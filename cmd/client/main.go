@@ -17,6 +17,13 @@ func handlerPause(gs *gamelogic.GameState) func(routing.PlayingState) {
 	}
 }
 
+func handlerMove(gs *gamelogic.GameState) func(gamelogic.ArmyMove) {
+	return func(move gamelogic.ArmyMove) {
+		defer fmt.Println(">")
+		gs.HandleMove(move)
+	}
+}
+
 func main() {
 	fmt.Println("Starting Peril client...")
 
@@ -32,13 +39,18 @@ func main() {
 		panic(err)
 	}
 
-	pubsub.DeclareAndBind(
-		conn,
-		routing.ExchangePerilDirect,
-		fmt.Sprintf("pause.%v", username),
-		routing.PauseKey,
-		pubsub.TRANSIENT,
-	)
+	channel, err := conn.Channel()
+	if err != nil {
+		panic(err)
+	}
+
+	// pubsub.DeclareAndBind(
+	// 	conn,
+	// 	routing.ExchangePerilDirect,
+	// 	fmt.Sprintf("pause.%v", username),
+	// 	routing.PauseKey,
+	// 	pubsub.TRANSIENT,
+	// )
 
 	state := gamelogic.NewGameState(username)
 
@@ -48,7 +60,17 @@ func main() {
 		fmt.Sprintf("pause.%v", username),
 		routing.PauseKey,
 		pubsub.TRANSIENT,
-		handlerPause(state))
+		handlerPause(state),
+	)
+
+	pubsub.SubscribeJSON(
+		conn,
+		routing.ExchangePerilTopic,
+		fmt.Sprintf("army_moves.%v", username),
+		"army_moves.*",
+		pubsub.TRANSIENT,
+		handlerMove(state),
+	)
 
 loop:
 	for {
@@ -66,7 +88,17 @@ loop:
 				continue
 			}
 		case "move":
-			_, err := state.CommandMove(words)
+			move, err := state.CommandMove(words)
+			if err != nil {
+				fmt.Println(err)
+				continue
+			}
+			err = pubsub.PublishJSON(
+				channel,
+				routing.ExchangePerilTopic,
+				fmt.Sprintf("army_moves.%v", username),
+				move,
+			)
 			if err != nil {
 				fmt.Println(err)
 				continue
