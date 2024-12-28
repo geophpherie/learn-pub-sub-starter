@@ -18,9 +18,10 @@ func handlerPause(gs *gamelogic.GameState) func(routing.PlayingState) pubsub.Ack
 	}
 }
 
-func handlerMove(gs *gamelogic.GameState) func(gamelogic.ArmyMove) pubsub.AckType {
+func handlerMove(gs *gamelogic.GameState, ch *amqp.Channel) func(gamelogic.ArmyMove) pubsub.AckType {
 	return func(move gamelogic.ArmyMove) pubsub.AckType {
 		defer fmt.Println(">")
+		fmt.Println(move)
 		outcome := gs.HandleMove(move)
 		switch outcome {
 		case gamelogic.MoveOutComeSafe:
@@ -28,8 +29,40 @@ func handlerMove(gs *gamelogic.GameState) func(gamelogic.ArmyMove) pubsub.AckTyp
 		case gamelogic.MoveOutcomeSamePlayer:
 			return pubsub.NackDiscard
 		case gamelogic.MoveOutcomeMakeWar:
+			err := pubsub.PublishJSON(
+				ch,
+				routing.ExchangePerilTopic,
+				fmt.Sprintf("%v.%v", routing.WarRecognitionsPrefix, gs.GetUsername()),
+				move,
+			)
+			if err != nil {
+				fmt.Println(err)
+				return pubsub.NackRequeue
+			}
 			return pubsub.Ack
 		default:
+			return pubsub.NackDiscard
+		}
+	}
+}
+
+func handlerWar(gs *gamelogic.GameState) func(gamelogic.RecognitionOfWar) pubsub.AckType {
+	return func(war gamelogic.RecognitionOfWar) pubsub.AckType {
+		defer fmt.Println(">")
+		outcome, _, _ := gs.HandleWar(war)
+		switch outcome {
+		case gamelogic.WarOutcomeNotInvolved:
+			return pubsub.NackRequeue
+		case gamelogic.WarOutcomeNoUnits:
+			return pubsub.NackDiscard
+		case gamelogic.WarOutcomeOpponentWon:
+			return pubsub.Ack
+		case gamelogic.WarOutcomeYouWon:
+			return pubsub.Ack
+		case gamelogic.WarOutcomeDraw:
+			return pubsub.Ack
+		default:
+			fmt.Println("Error in war message")
 			return pubsub.NackDiscard
 		}
 	}
@@ -55,14 +88,6 @@ func main() {
 		panic(err)
 	}
 
-	// pubsub.DeclareAndBind(
-	// 	conn,
-	// 	routing.ExchangePerilDirect,
-	// 	fmt.Sprintf("pause.%v", username),
-	// 	routing.PauseKey,
-	// 	pubsub.TRANSIENT,
-	// )
-
 	state := gamelogic.NewGameState(username)
 
 	pubsub.SubscribeJSON(
@@ -80,7 +105,16 @@ func main() {
 		fmt.Sprintf("army_moves.%v", username),
 		"army_moves.*",
 		pubsub.TRANSIENT,
-		handlerMove(state),
+		handlerMove(state, channel),
+	)
+
+	pubsub.SubscribeJSON(
+		conn,
+		routing.ExchangePerilTopic,
+		routing.WarRecognitionsPrefix,
+		fmt.Sprintf("%v.*", routing.WarRecognitionsPrefix),
+		pubsub.DURABLE,
+		handlerWar(state),
 	)
 
 loop:
@@ -107,7 +141,7 @@ loop:
 			err = pubsub.PublishJSON(
 				channel,
 				routing.ExchangePerilTopic,
-				fmt.Sprintf("army_moves.%v", username),
+				fmt.Sprintf("army_moves.%v", move.Player.Username),
 				move,
 			)
 			if err != nil {
