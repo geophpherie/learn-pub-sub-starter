@@ -11,7 +11,15 @@ import (
 
 const (
 	TRANSIENT = iota
-	DURABLE   = iota
+	DURABLE
+)
+
+type AckType int
+
+const (
+	Ack AckType = iota
+	NackRequeue
+	NackDiscard
 )
 
 func PublishJSON[T any](ch *amqp.Channel, exchange, key string, val T) error {
@@ -43,7 +51,7 @@ func SubscribeJSON[T any](
 	queueName,
 	key string,
 	simpleQueueType int,
-	handler func(T),
+	handler func(T) AckType,
 ) error {
 	channel, _, err := DeclareAndBind(conn, exchange, queueName, key, simpleQueueType)
 	if err != nil {
@@ -63,8 +71,20 @@ func SubscribeJSON[T any](
 				fmt.Println("msg decode error")
 			}
 
-			handler(data)
-			msg.Ack(true)
+			acktype := handler(data)
+			switch acktype {
+			case Ack:
+				fmt.Println("message ack")
+				msg.Ack(false)
+			case NackRequeue:
+				fmt.Println("message nack requeue")
+				msg.Nack(false, true)
+			case NackDiscard:
+				fmt.Println("message nack discard")
+				msg.Nack(false, false)
+			default:
+				panic("GAHH")
+			}
 		}
 	}()
 	return nil
@@ -97,7 +117,9 @@ func DeclareAndBind(
 		return nil, amqp.Queue{}, errors.New("Unknown Queue Type")
 	}
 
-	queue, err := channel.QueueDeclare(queueName, durable, autoDelete, exclusive, false, nil)
+	table := amqp.Table{"x-dead-letter-exchange": "peril_dlx"}
+
+	queue, err := channel.QueueDeclare(queueName, durable, autoDelete, exclusive, false, table)
 	if err != nil {
 		return nil, amqp.Queue{}, errors.New("Unable to create queue")
 	}
