@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 
 	amqp "github.com/rabbitmq/amqp091-go"
 )
@@ -36,7 +37,38 @@ func PublishJSON[T any](ch *amqp.Channel, exchange, key string, val T) error {
 	return nil
 
 }
+func SubscribeJSON[T any](
+	conn *amqp.Connection,
+	exchange,
+	queueName,
+	key string,
+	simpleQueueType int,
+	handler func(T),
+) error {
+	channel, _, err := DeclareAndBind(conn, exchange, queueName, key, simpleQueueType)
+	if err != nil {
+		return err
+	}
 
+	ch, err := channel.Consume(queueName, "", false, false, false, false, nil)
+	if err != nil {
+		return err
+	}
+
+	go func() {
+		for msg := range ch {
+			var data T
+			json.Unmarshal(msg.Body, &data)
+			if err != nil {
+				fmt.Println("msg decode error")
+			}
+
+			handler(data)
+			msg.Ack(true)
+		}
+	}()
+	return nil
+}
 func DeclareAndBind(
 	conn *amqp.Connection,
 	exchange,

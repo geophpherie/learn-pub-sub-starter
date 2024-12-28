@@ -2,9 +2,6 @@ package main
 
 import (
 	"fmt"
-	"os"
-	"os/signal"
-
 	"github.com/bootdotdev/learn-pub-sub-starter/internal/gamelogic"
 	"github.com/bootdotdev/learn-pub-sub-starter/internal/pubsub"
 	"github.com/bootdotdev/learn-pub-sub-starter/internal/routing"
@@ -12,6 +9,13 @@ import (
 )
 
 const SERVER = "amqp://guest:guest@localhost:5672"
+
+func handlerPause(gs *gamelogic.GameState) func(routing.PlayingState) {
+	return func(state routing.PlayingState) {
+		defer fmt.Println(">")
+		gs.HandlePause(state)
+	}
+}
 
 func main() {
 	fmt.Println("Starting Peril client...")
@@ -36,9 +40,50 @@ func main() {
 		pubsub.TRANSIENT,
 	)
 
-	// wait for close
-	signalChan := make(chan os.Signal, 1)
-	signal.Notify(signalChan, os.Interrupt)
-	<-signalChan
-	fmt.Println("Client is shutting down ...")
+	state := gamelogic.NewGameState(username)
+
+	pubsub.SubscribeJSON(
+		conn,
+		routing.ExchangePerilDirect,
+		fmt.Sprintf("pause.%v", username),
+		routing.PauseKey,
+		pubsub.TRANSIENT,
+		handlerPause(state))
+
+loop:
+	for {
+		words := gamelogic.GetInput()
+		if len(words) == 0 {
+			continue
+		}
+		switch words[0] {
+		case "spawn":
+			// []string{"americas", "europe", "africa", "asia", "antarctica", "australia"}
+			// []string{"infantry", "cavalry", "artillery"}
+			err := state.CommandSpawn(words)
+			if err != nil {
+				fmt.Println(err)
+				continue
+			}
+		case "move":
+			_, err := state.CommandMove(words)
+			if err != nil {
+				fmt.Println(err)
+				continue
+			}
+			fmt.Println("move was successful!")
+		case "status":
+			state.CommandStatus()
+		case "help":
+			gamelogic.PrintClientHelp()
+		case "spam":
+			fmt.Println("Spamming not allowed yet!")
+		case "quit":
+			gamelogic.PrintQuit()
+			break loop
+		default:
+			fmt.Println("unknown command")
+			continue
+		}
+	}
 }
