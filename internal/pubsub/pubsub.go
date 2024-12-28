@@ -3,8 +3,14 @@ package pubsub
 import (
 	"context"
 	"encoding/json"
+	"errors"
 
 	amqp "github.com/rabbitmq/amqp091-go"
+)
+
+const (
+	TRANSIENT = iota
+	DURABLE   = iota
 )
 
 func PublishJSON[T any](ch *amqp.Channel, exchange, key string, val T) error {
@@ -28,5 +34,44 @@ func PublishJSON[T any](ch *amqp.Channel, exchange, key string, val T) error {
 	}
 
 	return nil
+
+}
+
+func DeclareAndBind(
+	conn *amqp.Connection,
+	exchange,
+	queueName,
+	key string,
+	simpleQueueType int, // an enum to represent "durable" or "transient"
+) (*amqp.Channel, amqp.Queue, error) {
+	channel, err := conn.Channel()
+	if err != nil {
+		return nil, amqp.Queue{}, errors.New("Unable to create channel")
+	}
+
+	var durable bool
+	var autoDelete bool
+	var exclusive bool
+	switch simpleQueueType {
+	case TRANSIENT:
+		autoDelete = true
+		exclusive = true
+		durable = false
+	case DURABLE:
+		autoDelete = false
+		exclusive = false
+		durable = true
+	default:
+		return nil, amqp.Queue{}, errors.New("Unknown Queue Type")
+	}
+
+	queue, err := channel.QueueDeclare(queueName, durable, autoDelete, exclusive, false, nil)
+	if err != nil {
+		return nil, amqp.Queue{}, errors.New("Unable to create queue")
+	}
+
+	channel.QueueBind(queueName, key, exchange, false, nil)
+
+	return channel, queue, nil
 
 }
