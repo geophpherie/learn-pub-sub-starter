@@ -21,7 +21,6 @@ func handlerPause(gs *gamelogic.GameState) func(routing.PlayingState) pubsub.Ack
 func handlerMove(gs *gamelogic.GameState, ch *amqp.Channel) func(gamelogic.ArmyMove) pubsub.AckType {
 	return func(move gamelogic.ArmyMove) pubsub.AckType {
 		defer fmt.Println(">")
-		fmt.Println(move)
 		outcome := gs.HandleMove(move)
 		switch outcome {
 		case gamelogic.MoveOutComeSafe:
@@ -33,7 +32,10 @@ func handlerMove(gs *gamelogic.GameState, ch *amqp.Channel) func(gamelogic.ArmyM
 				ch,
 				routing.ExchangePerilTopic,
 				fmt.Sprintf("%v.%v", routing.WarRecognitionsPrefix, gs.GetUsername()),
-				move,
+				gamelogic.RecognitionOfWar{
+					Attacker: move.Player,
+					Defender: gs.GetPlayerSnap(),
+				},
 			)
 			if err != nil {
 				fmt.Println(err)
@@ -49,7 +51,8 @@ func handlerMove(gs *gamelogic.GameState, ch *amqp.Channel) func(gamelogic.ArmyM
 func handlerWar(gs *gamelogic.GameState) func(gamelogic.RecognitionOfWar) pubsub.AckType {
 	return func(war gamelogic.RecognitionOfWar) pubsub.AckType {
 		defer fmt.Println(">")
-		outcome, _, _ := gs.HandleWar(war)
+		outcome, winner, loser := gs.HandleWar(war)
+		fmt.Printf("winner: %v, loser: %v\n", winner, loser)
 		switch outcome {
 		case gamelogic.WarOutcomeNotInvolved:
 			return pubsub.NackRequeue
