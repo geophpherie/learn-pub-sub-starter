@@ -25,7 +25,7 @@ const (
 )
 
 func PublishGob[T any](ch *amqp.Channel, exchange, key string, val T) error {
-	buffer := bytes.Buffer{}
+	var buffer bytes.Buffer
 	encoder := gob.NewEncoder(&buffer)
 	if err := encoder.Encode(val); err != nil {
 		return err
@@ -72,6 +72,53 @@ func PublishJSON[T any](ch *amqp.Channel, exchange, key string, val T) error {
 
 }
 
+func SubscribeGob[T any](
+	conn *amqp.Connection,
+	exchange,
+	queueName,
+	key string,
+	simpleQueueType int,
+	handler func(T) AckType,
+) error {
+	channel, _, err := DeclareAndBind(conn, exchange, queueName, key, simpleQueueType)
+	if err != nil {
+		return err
+	}
+
+	ch, err := channel.Consume(queueName, "", false, false, false, false, nil)
+	if err != nil {
+		return err
+	}
+
+	go func() {
+		for msg := range ch {
+			buffer := bytes.NewBuffer(msg.Body)
+			decoder := gob.NewDecoder(buffer)
+			var data T
+			err := decoder.Decode(&data)
+			if err != nil {
+				fmt.Printf("msg decode error %v\n", err)
+			}
+
+			acktype := handler(data)
+			switch acktype {
+			case Ack:
+				fmt.Println("message ack")
+				msg.Ack(false)
+			case NackRequeue:
+				fmt.Println("message nack requeue")
+				msg.Nack(false, true)
+			case NackDiscard:
+				fmt.Println("message nack discard")
+				msg.Nack(false, false)
+			default:
+				panic("GAHH")
+			}
+		}
+	}()
+	return nil
+}
+
 func SubscribeJSON[T any](
 	conn *amqp.Connection,
 	exchange,
@@ -96,6 +143,7 @@ func SubscribeJSON[T any](
 			json.Unmarshal(msg.Body, &data)
 			if err != nil {
 				fmt.Println("msg decode error")
+				continue
 			}
 
 			acktype := handler(data)

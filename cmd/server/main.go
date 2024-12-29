@@ -11,6 +11,15 @@ import (
 
 const SERVER = "amqp://guest:guest@localhost:5672"
 
+func handlerLogs() func(routing.GameLog) pubsub.AckType {
+	return func(gamelog routing.GameLog) pubsub.AckType {
+		defer fmt.Println(">")
+		fmt.Println(gamelog)
+		gamelogic.WriteLog(gamelog)
+		return pubsub.Ack
+	}
+}
+
 func main() {
 	fmt.Println("Starting Peril server...")
 
@@ -27,12 +36,13 @@ func main() {
 		panic(err)
 	}
 
-	pubsub.DeclareAndBind(
+	pubsub.SubscribeGob(
 		conn,
 		routing.ExchangePerilTopic,
 		routing.GameLogSlug,
-		"game_logs.*",
+		fmt.Sprintf("%v.*", routing.GameLogSlug),
 		pubsub.DURABLE,
+		handlerLogs(),
 	)
 
 	gamelogic.PrintServerHelp()

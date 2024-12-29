@@ -60,7 +60,7 @@ func handlerWar(gs *gamelogic.GameState, ch *amqp.Channel) func(gamelogic.Recogn
 		case gamelogic.WarOutcomeNoUnits:
 			return pubsub.NackDiscard
 		case gamelogic.WarOutcomeOpponentWon:
-			err := pubsub.PublishJSON(
+			err := pubsub.PublishGob(
 				ch,
 				routing.ExchangePerilTopic,
 				fmt.Sprintf("%v.%v", routing.GameLogSlug, war.Attacker.Username),
@@ -76,7 +76,7 @@ func handlerWar(gs *gamelogic.GameState, ch *amqp.Channel) func(gamelogic.Recogn
 			}
 			return pubsub.Ack
 		case gamelogic.WarOutcomeYouWon:
-			err := pubsub.PublishJSON(
+			err := pubsub.PublishGob(
 				ch,
 				routing.ExchangePerilTopic,
 				fmt.Sprintf("%v.%v", routing.GameLogSlug, war.Attacker.Username),
@@ -92,7 +92,7 @@ func handlerWar(gs *gamelogic.GameState, ch *amqp.Channel) func(gamelogic.Recogn
 			}
 			return pubsub.Ack
 		case gamelogic.WarOutcomeDraw:
-			err := pubsub.PublishJSON(
+			err := pubsub.PublishGob(
 				ch,
 				routing.ExchangePerilTopic,
 				fmt.Sprintf("%v.%v", routing.GameLogSlug, war.Attacker.Username),
